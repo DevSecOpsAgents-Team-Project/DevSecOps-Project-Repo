@@ -1,0 +1,54 @@
+{
+  "schema_version": "1.0",
+  "incident_id": "gd-finding-123",
+  "policy_version": "v1.0",
+  "policy_meta": {
+    "approved_by": "SecurityCommittee",
+    "approved_at": "2026-02-15"
+  },
+  "assumption_hash": "a1b2c3d4e5f6...64hex",
+  "cost_summary": {
+    "estimated_monthly_cost": 43.69,
+    "currency": "USD"
+  },
+  "driver_breakdown": [
+    {"driver": "CloudWatchLogs", "cost": 10.0, "percentage": 22.89},
+    {"driver": "S3Storage", "cost": 9.58, "percentage": 21.93},
+    {"driver": "NAT_Egress", "cost": 11.25, "percentage": 25.75},
+    {"driver": "Snapshot", "cost": 12.86, "percentage": 29.43}
+  ],
+  "top3_drivers": ["Snapshot", "NAT_Egress", "CloudWatchLogs"],
+  "insights": {
+    "top_drivers": [
+      {"driver": "Snapshot", "cost": 12.86, "percentage": 29.43},
+      {"driver": "NAT_Egress", "cost": 11.25, "percentage": 25.75},
+      {"driver": "CloudWatchLogs", "cost": 10.0, "percentage": 22.89}
+    ],
+    "sensitivity": [
+      {
+        "parameter": "traffic_multiplier",
+        "base": 1.0,
+        "variant": 2.0,
+        "cost_delta": 21.25,
+        "increase_rate_pct": 48.64
+      },
+      {
+        "parameter": "duration_hours",
+        "base": 24,
+        "variant": 168,
+        "cost_delta": 37.39,
+        "increase_rate_pct": 85.58
+      },
+      {
+        "parameter": "log_multiplier",
+        "base": 1.5,
+        "variant": 2.0,
+        "cost_delta": 3.33,
+        "increase_rate_pct": 7.62
+      }
+    ],
+    "tradeoffs": [
+      "S1 서비스 계층에서는 가용성 보호를 위해 격리 조치가 제외되었습니다."
+    ]
+  }
+}

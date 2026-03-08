@@ -54,6 +54,45 @@
       "maxItems": 3,
       "items": { "type": "string" }
     },
+    "insights": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["top_drivers", "sensitivity", "tradeoffs"],
+      "properties": {
+        "top_drivers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["driver", "cost", "percentage"],
+            "properties": {
+              "driver": { "type": "string" },
+              "cost": { "type": "number" },
+              "percentage": { "type": "number" }
+            }
+          }
+        },
+        "sensitivity": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["parameter", "base", "variant", "cost_delta", "increase_rate_pct"],
+            "properties": {
+              "parameter": { "type": "string" },
+              "base": { "type": "number" },
+              "variant": { "type": "number" },
+              "cost_delta": { "type": "number" },
+              "increase_rate_pct": { "type": "number" }
+            }
+          }
+        },
+        "tradeoffs": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
     "xai": {
       "type": "object",
       "additionalProperties": false,

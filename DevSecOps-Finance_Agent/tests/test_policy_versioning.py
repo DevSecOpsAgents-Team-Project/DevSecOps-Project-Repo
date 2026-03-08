@@ -5,6 +5,7 @@ import pytest
 from pathlib import Path
 
 from src.engine import finance_run
+from src.pricing_provider import PolicyPricingProvider
 
 SAMPLES_DIR = Path(__file__).resolve().parent.parent / "samples"
 POLICY_DIR = Path(__file__).resolve().parent.parent / "policy"
@@ -32,7 +33,12 @@ def policy_v1_1():
         v1_1_path.unlink()
 
 
-def test_v1_0_vs_v1_1_different_cost(policy_v1_1):
+def test_v1_0_vs_v1_1_different_cost(policy_v1_1, monkeypatch):
+    """정책 버전별로 다른 단가가 적용되는지 검증. USE_AWS_PRICING_API 여부와 무관하게 policy 단가 사용."""
+    monkeypatch.setattr(
+        "src.engine.get_pricing_provider",
+        lambda: PolicyPricingProvider(),
+    )
     req = _load_sample()
     req["policy_version"] = "v1.0"
     result_v10 = finance_run(req)

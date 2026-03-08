@@ -1,4 +1,7 @@
-"""Finance Agent engine: request -> validate -> contract -> policy -> pricing -> result."""
+"""Finance Agent engine: request -> validate -> contract -> policy -> pricing -> scoring -> insights -> result."""
+
+from .load_env import load_dotenv_if_present
+load_dotenv_if_present()
 
 import jsonschema
 
@@ -6,6 +9,10 @@ from .contract import normalize_and_validate_assumptions
 from .errors import ContractViolation, contract_error_response
 from .policy_loader import load_policy
 from .pricing import compute_costs
+from .pricing_provider import get_pricing_provider
+from .explanation_provider import get_explanation_provider
+from .scoring_engine import compute_action_scores
+from .insights import build_insights
 from .assumption_hash import assumption_hash
 from .validate import validate_request, validate_result
 
@@ -73,11 +80,35 @@ def finance_run(request_obj: dict) -> dict:
             }
         }
 
-    # 4) Pricing
-    pricing_table = policy["pricing_table"]
+    # 4) Pricing (단가는 policy 또는 USE_AWS_PRICING_API 시 AWS Pricing API)
+    region = normalized.get("region", "us-east-1")
+    pricing_table = get_pricing_provider().get_pricing_table(region, policy)
     computed = compute_costs(resource_change, normalized, pricing_table)
 
-    # 5) Build result (A-part does not add xai)
+    # 5) Scoring (decision_result for insights)
+    risk_adjusted_loss = float(request_obj.get("risk_adjusted_loss", 0))
+    profile = normalized.get("org_profile", "Standard")
+    _scores, recommended_action = compute_action_scores(
+        computed["total"], risk_adjusted_loss, profile
+    )
+    decision_result = {
+        "recommended_action": recommended_action,
+        "profile": profile,
+        "regulation_weight": float(request_obj.get("regulation_weight", 1.0)),
+        "service_tier": normalized.get("service_tier", "S2"),
+        "severity": request_obj.get("severity") or request_obj.get("assumptions", {}).get("severity", "medium"),
+    }
+
+    # 6) Insights (템플릿 또는 USE_LLM_EXPLANATIONS 시 LLM)
+    insights = get_explanation_provider().generate_insights(
+        request_obj,
+        computed,
+        decision_result,
+        policy,
+        normalized,
+    )
+
+    # 7) Build result
     result = {
         "schema_version": "1.0",
         "incident_id": incident_id,
@@ -93,12 +124,13 @@ def finance_run(request_obj: dict) -> dict:
         },
         "driver_breakdown": computed["breakdown"],
         "top3_drivers": computed["top3_drivers"],
+        "insights": insights,
     }
 
     context = {"policy": policy, "normalized_assumptions": normalized, "computed": computed}
     result = post_process_hook(result, request_obj, context)
 
-    # 6) Result schema validate
+    # 8) Result schema validate
     try:
         validate_result(result)
     except jsonschema.ValidationError as e:

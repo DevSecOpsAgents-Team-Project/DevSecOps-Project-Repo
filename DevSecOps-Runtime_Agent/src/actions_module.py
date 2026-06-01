@@ -438,6 +438,15 @@ def disable_iam_entity(user_name: str, incident_id: str, dry_run: bool = False):
     1. 모든 Access Key를 'Inactive'로 변경 (기존 상태 저장)
     2. 'DenyAll' 인라인 정책 부착
     """
+    if not user_name or not str(user_name).strip():
+        return build_response(
+            "disable_iam_entity",
+            incident_id,
+            "FAILED",
+            details={"error": "user_name is required"},
+        )
+
+    user_name = str(user_name).strip()
     iam = boto3.client("iam") 
 
     try:
@@ -530,7 +539,7 @@ def notify_to_slack(message: str, incident_id: str = "UNKNOWN", dry_run: bool = 
 
     # Slack 메시지 구성 (Rich Format)
     payload = {
-        "text": f"🚨 *[Agent B] 보안 대응 알림*",
+        "text": f"🚨 *[OpsGuard AI Agent] 보안 사고 감지*",
         "attachments": [
             {
                 "color": "#ff0000",
@@ -538,7 +547,7 @@ def notify_to_slack(message: str, incident_id: str = "UNKNOWN", dry_run: bool = 
                     {"title": "Incident ID", "value": incident_id, "short": True},
                     {"title": "상세 내용", "value": message, "short": False}
                 ],
-                "footer": "Agent B Runtime Security",
+                "footer": "OpsGuard AI Security Agent",
                 "ts": int(datetime.datetime.utcnow().timestamp())
             }
         ]
@@ -560,6 +569,7 @@ def notify_to_slack(message: str, incident_id: str = "UNKNOWN", dry_run: bool = 
         return build_response("notify_to_slack", incident_id, "FAILED", details={"error": str(e)})
 
 
+<<<<<<< HEAD
 def _action_result_status(result) -> str:
     if not isinstance(result, dict):
         return "UNKNOWN"
@@ -638,6 +648,80 @@ def notify_mitigation_outcome(
     )
     notify_to_slack(message, incident_id, dry_run=dry_run)
     return overall
+=======
+def notify_execution_result_to_slack(
+    incident_id: str,
+    success: bool,
+    detail_message: str,
+    dry_run: bool = False,
+):
+    """
+    L2/L3 승인 조치 실행 직후 성공/실패 결과를 Slack Webhook으로 전송합니다.
+    """
+    import requests
+
+    slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
+
+    if dry_run:
+        logger.info("[DRY-RUN] 조치 결과 Slack 스킵: success=%s %s", success, detail_message)
+        return build_response(
+            "notify_execution_result_to_slack",
+            incident_id,
+            "SKIPPED",
+            details={"success": success, "message": detail_message},
+        )
+
+    if not slack_webhook_url:
+        logger.error("[ACTIONS] SLACK_WEBHOOK_URL 환경 변수가 설정되지 않았습니다.")
+        return build_response(
+            "notify_execution_result_to_slack",
+            incident_id,
+            "FAILED",
+            details={"error": "Webhook URL missing"},
+        )
+
+    if success:
+        title = "✅ *[Agent B] 조치 실행 성공*"
+        color = "#36a64f"
+    else:
+        title = "❌ *[Agent B] 조치 실행 실패*"
+        color = "#ff0000"
+
+    payload = {
+        "text": title,
+        "attachments": [
+            {
+                "color": color,
+                "fields": [
+                    {"title": "Incident ID", "value": incident_id, "short": True},
+                    {"title": "결과", "value": "성공" if success else "실패", "short": True},
+                    {"title": "상세", "value": detail_message, "short": False},
+                ],
+                "footer": "Agent B Runtime Security",
+                "ts": int(datetime.datetime.utcnow().timestamp()),
+            }
+        ],
+    }
+
+    try:
+        response = requests.post(slack_webhook_url, json=payload, timeout=5)
+        response.raise_for_status()
+        logger.info("[ACTIONS] 조치 결과 Slack 전송 성공: %s success=%s", incident_id, success)
+        return build_response(
+            "notify_execution_result_to_slack",
+            incident_id,
+            "SUCCESS",
+            details={"success": success, "message": detail_message},
+        )
+    except Exception as e:
+        logger.error("[ACTIONS] 조치 결과 Slack 전송 실패: %s", e)
+        return build_response(
+            "notify_execution_result_to_slack",
+            incident_id,
+            "FAILED",
+            details={"error": str(e)},
+        )
+>>>>>>> 48c8bfa7452cc67b0cf00f23d94b1d1f947d612d
 
 
 # ======================================================
@@ -852,6 +936,15 @@ def disable_access_key(user_name: str, access_key_id: str, incident_id: str, dry
     """
     특정 IAM User의 Access Key를 Inactive로 비활성화합니다.
     """
+    if not user_name or not str(user_name).strip() or not access_key_id:
+        return build_response(
+            "disable_access_key",
+            incident_id,
+            "FAILED",
+            details={"error": "user_name and access_key_id are required"},
+        )
+
+    user_name = str(user_name).strip()
     iam = boto3.client("iam")
 
     try:
@@ -899,6 +992,15 @@ def detach_admin_policies(user_name: str, incident_id: str, dry_run=False):
     주어진 IAM User에 붙어있는 관리자 권한 정책(예: AdministratorAccess)을 Detach합니다.
     (간단하게: 모든 attached managed policy를 떼는 방식으로 구현 가능)
     """
+    if not user_name or not str(user_name).strip():
+        return build_response(
+            "detach_admin_policies",
+            incident_id,
+            "FAILED",
+            details={"error": "user_name is required"},
+        )
+
+    user_name = str(user_name).strip()
     iam = boto3.client("iam")
 
     try:
@@ -1236,6 +1338,11 @@ class Actions:
     # --- Notification ---
     def notify_to_slack(self, message: str, incident_id: str):
         return notify_to_slack(message, incident_id, dry_run=self.dry_run)
+
+    def notify_execution_result_to_slack(self, incident_id: str, success: bool, detail_message: str):
+        return notify_execution_result_to_slack(
+            incident_id, success, detail_message, dry_run=self.dry_run
+        )
 
     # --- [New] Decision Support Functions ---
     def get_resource_tags(self, resource_id: str):

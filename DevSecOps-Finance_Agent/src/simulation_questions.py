@@ -99,12 +99,22 @@ def recommend_level_from_user_response(
     """
     validate_user_response(user_response)
     playbooks = comparison.get("playbooks") or []
-    if len(playbooks) < 2:
-        p = playbooks[0] if playbooks else {}
+    if not playbooks:
         return {
-            "recommended_level": p.get("level"),
-            "playbook_name": p.get("playbook_name", ""),
-            "reason": "플레이북 후보가 부족하여 비교 추천을 할 수 없습니다.",
+            "recommended_level": None,
+            "playbook_name": "",
+            "reason": "",
+        }
+    if len(playbooks) == 1:
+        chosen = playbooks[0]
+        level = chosen.get("level")
+        name = chosen.get("playbook_name", "")
+        cost = (chosen.get("cost_summary") or {}).get("estimated_monthly_cost")
+        return {
+            "recommended_level": level,
+            "playbook_name": name,
+            "reason": f"제공된 플레이북 L{level} ({name})를 추천합니다."
+            + (f" 예상 비용: {cost} USD." if cost is not None else ""),
         }
 
     env = user_response.get("environment", "staging")

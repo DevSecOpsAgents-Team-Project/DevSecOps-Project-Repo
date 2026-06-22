@@ -101,14 +101,14 @@ def _normalize_playbook_level(level: Any) -> int | None:
     return n if n in (2, 3) else None
 
 
-def _extract_candidates(reg: dict) -> tuple[dict, dict]:
+def _extract_candidates(reg: dict) -> tuple[dict | None, dict | None]:
     """
     반환:
-    - (level2_candidate, level3_candidate) 각각 dict
+    - (level2_candidate, level3_candidate) — 없으면 None (에러 없이 반환)
     """
     actions = reg.get("recommended_actions") or []
     if not isinstance(actions, list):
-        raise ValueError("recommended_actions must be a list")
+        actions = []
 
     level2 = None
     level3 = None
@@ -120,9 +120,6 @@ def _extract_candidates(reg: dict) -> tuple[dict, dict]:
             level2 = a
         elif lvl == 3 and level3 is None:
             level3 = a
-
-    if level2 is None or level3 is None:
-        raise ValueError("recommended_actions must include both level=2 and level=3 candidates")
 
     return level2, level3
 
@@ -230,10 +227,14 @@ def get_simulation_recommendation_from_regulation(
     policy = load_policy(policy_version)
 
     level2_raw, level3_raw = _extract_candidates(reg)
-    candidates: dict[int, dict] = {2: level2_raw, 3: level3_raw}
+    raw_by_level: dict[int, dict] = {}
+    if level2_raw is not None:
+        raw_by_level[2] = level2_raw
+    if level3_raw is not None:
+        raw_by_level[3] = level3_raw
 
     computed_candidates: dict[int, _Candidate] = {}
-    for lvl, raw in candidates.items():
+    for lvl, raw in raw_by_level.items():
         playbook_name = str(raw.get("playbook_name") or "").strip()
         defaults_key = _infer_defaults_key(raw, playbook_name)
         if not defaults_key:
@@ -272,17 +273,12 @@ def get_simulation_recommendation_from_regulation(
         ),
         "playbooks": [
             {
-                "level": 2,
-                "playbook_name": computed_candidates[2].playbook_name,
-                "cost_summary": {"estimated_monthly_cost": computed_candidates[2].cost_monthly},
-                "expected_impact": computed_candidates[2].expected_impact,
-            },
-            {
-                "level": 3,
-                "playbook_name": computed_candidates[3].playbook_name,
-                "cost_summary": {"estimated_monthly_cost": computed_candidates[3].cost_monthly},
-                "expected_impact": computed_candidates[3].expected_impact,
-            },
+                "level": lvl,
+                "playbook_name": computed_candidates[lvl].playbook_name,
+                "cost_summary": {"estimated_monthly_cost": computed_candidates[lvl].cost_monthly},
+                "expected_impact": computed_candidates[lvl].expected_impact,
+            }
+            for lvl in sorted(computed_candidates.keys())
         ],
     }
 

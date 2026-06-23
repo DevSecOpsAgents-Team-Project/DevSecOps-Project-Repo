@@ -1,0 +1,41 @@
+# OpsGuard SAM 배포 설정 예시
+# 최초 배포: sam deploy --guided
+# 이후 배포: sam build && sam deploy
+
+version = 0.1
+
+[default.global.parameters]
+stack_name = "opsguard"
+region = "ap-northeast-2"
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.validate.parameters]
+lint = true
+
+[default.deploy.parameters]
+capabilities = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND"
+confirm_changeset = true
+resolve_s3 = true
+resolve_image_repos = true
+# SlackChannel은 실제 Slack 채널 ID로 교체하세요.
+parameter_overrides = [
+  "SlackChannel=C0123456789",
+  "DynamoDbTableName=AgentB_Response_History",
+  "DynamoDbTableArn=arn:aws:dynamodb:ap-northeast-2:836347236184:table/AgentB_Response_History",
+  "RegulationJsonTableName=Regulation_JSON",
+  "S3LogBucketName=mcp-security-logs-bucket",
+  "WafIpSetId=657906ea-7bc5-4c48-b500-6b2686fdb9d2",
+  "WafIpSetName=OpsGuard-Block-IPSet",
+  "VpcFlowLogRoleArn=arn:aws:iam::836347236184:role/AgentB-FlowLog-Role",
+  "ChromaCollection=csa_ccm_v4",
+  "RegulationImageTag=deploy-latest"
+]
+
+[default.package.parameters]
+resolve_s3 = true
+
+[default.sync.parameters]
+watch = true

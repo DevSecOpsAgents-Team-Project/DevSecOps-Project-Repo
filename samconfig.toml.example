@@ -23,7 +23,6 @@ resolve_image_repos = true
 parameter_overrides = [
   "DeployMode=greenfield",
   "SlackChannel=C0123456789",
-  "ResourceNameSuffix=",
   "EnableGuardDutyTrigger=true",
   "RegulationImageTag=latest"
 ]

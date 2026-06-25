@@ -1,8 +1,9 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  OpsGuard — GuardDuty Finding 수신 후 MCP Orchestrator가 Runtime / Finance / Regulation Agent를
-  호출하고, Slack 승인 흐름을 처리합니다. DynamoDB·S3·WAF IPSet·VPC Flow Log Role은 기존 리소스를 참조합니다.
+  OpsGuard - GuardDuty Finding to MCP Orchestrator to Runtime / Finance / Regulation Agents.
+  DeployMode=greenfield creates DynamoDB, S3, WAF IPSet, VPC Flow Log Role in your account.
+  DeployMode=existing references resources you already have (team production account).
 
 Globals:
   Function:
@@ -12,44 +13,59 @@ Globals:
       - x86_64
 
 Parameters:
-  AwsAccountId:
+  DeployMode:
     Type: String
-    Default: '836347236184'
-    Description: AWS 계정 ID
+    Default: greenfield
+    AllowedValues:
+      - greenfield
+      - existing
+    Description: >
+      greenfield = new AWS account (create DynamoDB/S3/WAF/Role).
+      existing = reuse tables/bucket/WAF/role already in the account.
 
   SlackChannel:
     Type: String
-    Description: Slack 채널 ID (예 C0123456789). MCP가 Finance 폼을 전송할 채널.
+    Description: Slack channel ID (e.g. C0123456789). MCP sends Finance forms here.
 
+  ResourceNameSuffix:
+    Type: String
+    Default: ''
+    Description: Optional suffix for Lambda names and EventBridge rule (e.g. -dev).
+
+  EnableGuardDutyTrigger:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: Create EventBridge rule guardduty-to-mcp (set false for parallel test stacks).
+
+  # --- existing mode only (ignored when DeployMode=greenfield) ---
   DynamoDbTableName:
     Type: String
     Default: AgentB_Response_History
-    Description: Runtime Agent 롤백/이력 DynamoDB 테이블 이름 (기존 테이블 참조)
 
   DynamoDbTableArn:
     Type: String
-    Default: arn:aws:dynamodb:ap-northeast-2:836347236184:table/AgentB_Response_History
-    Description: Runtime Agent DynamoDB 테이블 ARN (기존 테이블 참조)
+    Default: arn:aws:dynamodb:ap-northeast-2:000000000000:table/AgentB_Response_History
+    Description: existing mode only - DynamoDB table ARN
 
   RegulationJsonTableName:
     Type: String
     Default: Regulation_JSON
-    Description: MCP가 Regulation 결과를 저장하고 Slack-Response가 읽는 DynamoDB 테이블 (기존 테이블 참조)
 
   S3LogBucketName:
     Type: String
     Default: mcp-security-logs-bucket
-    Description: Runtime Agent S3 로깅 대상 버킷 (기존 버킷 참조)
 
   WafIpSetId:
     Type: String
-    Default: 657906ea-7bc5-4c48-b500-6b2686fdb9d2
-    Description: 기존 WAFv2 Regional IPSet ID
+    Default: 00000000-0000-0000-0000-000000000000
+    Description: existing mode only - WAFv2 IPSet ID
 
   WafIpSetName:
     Type: String
     Default: OpsGuard-Block-IPSet
-    Description: 기존 WAFv2 Regional IPSet 이름
 
   WafScope:
     Type: String
@@ -57,69 +73,153 @@ Parameters:
     AllowedValues:
       - REGIONAL
       - CLOUDFRONT
-    Description: WAF IPSet 스코프
 
   VpcFlowLogRoleArn:
     Type: String
-    Default: arn:aws:iam::836347236184:role/AgentB-FlowLog-Role
-    Description: VPC Flow Logs용 기존 IAM Role ARN (PassRole 대상)
+    Default: arn:aws:iam::000000000000:role/OpsGuard-FlowLog-Role
+    Description: existing mode only - VPC Flow Logs IAM role ARN
 
   VpcFlowLogGroup:
     Type: String
     Default: /aws/vpc/flowlogs
-    Description: VPC Flow Logs CloudWatch Log Group 이름
 
+  RegulationImageUri:
+    Type: String
+    Default: 000000000000.dkr.ecr.ap-northeast-2.amazonaws.com/regulation-agent:latest
+    Description: existing mode only - pre-built ECR image URI (skip local Docker build).
+
+  # --- Regulation build (greenfield) ---
   ChromaCollection:
     Type: String
     Default: csa_ccm_v4
-    Description: Regulation Agent ChromaDB 컬렉션 이름
 
   OpenAiModel:
     Type: String
     Default: gpt-4o-mini
-    Description: Regulation Agent OpenAI 모델
 
   RegulationImageTag:
     Type: String
     Default: latest
-    Description: SAM build 시 ECR에 푸시할 Regulation Agent 이미지 태그
+
+Conditions:
+  IsGreenfield: !Equals [!Ref DeployMode, greenfield]
+  IsExisting: !Equals [!Ref DeployMode, existing]
+  CreateGuardDutyTrigger: !Equals [!Ref EnableGuardDutyTrigger, 'true']
 
 Resources:
-  # ---------------------------------------------------------------------------
-  # HTTP API — Slack Events
-  # ---------------------------------------------------------------------------
+  # ===========================================================================
+  # Greenfield: DynamoDB, S3, WAF IPSet, VPC Flow Log Role
+  # ===========================================================================
+  ResponseHistoryTable:
+    Type: AWS::DynamoDB::Table
+    Condition: IsGreenfield
+    Properties:
+      TableName: !Ref DynamoDbTableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: HistoryID
+          AttributeType: S
+        - AttributeName: Timestamp
+          AttributeType: S
+        - AttributeName: IncidentId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: HistoryID
+          KeyType: HASH
+        - AttributeName: Timestamp
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: IncidentId-Index
+          KeySchema:
+            - AttributeName: IncidentId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  RegulationJsonTable:
+    Type: AWS::DynamoDB::Table
+    Condition: IsGreenfield
+    Properties:
+      TableName: !Ref RegulationJsonTableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: incident_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: incident_id
+          KeyType: HASH
+
+  SecurityLogsBucket:
+    Type: AWS::S3::Bucket
+    Condition: IsGreenfield
+    Properties:
+      BucketName: !Sub opsguard-logs-${AWS::AccountId}-${AWS::Region}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  BlockIpSet:
+    Type: AWS::WAFv2::IPSet
+    Condition: IsGreenfield
+    Properties:
+      Name: !Sub ${WafIpSetName}${ResourceNameSuffix}
+      Scope: !Ref WafScope
+      IPAddressVersion: IPV4
+      Addresses: []
+
+  VpcFlowLogRole:
+    Type: AWS::IAM::Role
+    Condition: IsGreenfield
+    Properties:
+      RoleName: !Sub OpsGuard-FlowLog-Role${ResourceNameSuffix}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: vpc-flow-logs.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+
+  # ===========================================================================
+  # HTTP API - Slack Events
+  # ===========================================================================
   OpsGuardHttpApi:
     Type: AWS::Serverless::HttpApi
     Properties:
       StageName: $default
-      Description: OpsGuard Slack 이벤트 수신용 HTTP API
+      Description: OpsGuard Slack events endpoint
 
-  # ---------------------------------------------------------------------------
+  # ===========================================================================
   # Finance Agent
-  # ---------------------------------------------------------------------------
+  # ===========================================================================
   FinanceAgentFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: Finance_Agent
+      FunctionName: !Sub Finance_Agent${ResourceNameSuffix}
       Runtime: python3.11
       Handler: handler.lambda_handler
       CodeUri: DevSecOps-Finance_Agent/
-      Description: 비용 분석 및 시뮬레이션 추천
+      Description: Cost analysis and simulation
       Environment:
         Variables:
           OPENAI_API_KEY: '{{resolve:secretsmanager:opsguard/openai:SecretString:OPENAI_API_KEY}}'
       Policies:
         - AWSLambdaBasicExecutionRole
 
-  # ---------------------------------------------------------------------------
-  # Regulation Agent (Container Image — ChromaDB RAG)
-  # ---------------------------------------------------------------------------
-  RegulationAgentFunction:
+  # ===========================================================================
+  # Regulation Agent - Docker build (greenfield)
+  # ===========================================================================
+  RegulationAgentFunctionBuild:
     Type: AWS::Serverless::Function
+    Condition: IsGreenfield
     Properties:
-      FunctionName: Regulation_Agent_20260616
+      FunctionName: !Sub Regulation_Agent${ResourceNameSuffix}
       PackageType: Image
-      Description: ChromaDB 기반 규제/RAG 분석 (컨테이너 이미지)
+      Description: ChromaDB RAG regulation analysis (built from Dockerfile)
       ImageConfig:
         Command:
           - lambda_function.lambda_handler
@@ -135,26 +235,63 @@ Resources:
       DockerContext: ./DevSecOps-Regulation_Agent
       Dockerfile: Dockerfile
 
-  # ---------------------------------------------------------------------------
+  # ===========================================================================
+  # Regulation Agent - existing ECR image (existing mode)
+  # ===========================================================================
+  RegulationAgentFunctionImage:
+    Type: AWS::Serverless::Function
+    Condition: IsExisting
+    Properties:
+      FunctionName: !Sub Regulation_Agent${ResourceNameSuffix}
+      PackageType: Image
+      ImageUri: !Ref RegulationImageUri
+      Description: ChromaDB RAG regulation analysis (pre-built ECR image)
+      ImageConfig:
+        Command:
+          - lambda_function.lambda_handler
+      Environment:
+        Variables:
+          CHROMA_COLLECTION: !Ref ChromaCollection
+          OPENAI_API_KEY: '{{resolve:secretsmanager:opsguard/openai:SecretString:OPENAI_API_KEY}}'
+          OPENAI_MODEL: !Ref OpenAiModel
+      Policies:
+        - AWSLambdaBasicExecutionRole
+
+  # ===========================================================================
   # Runtime Agent
-  # ---------------------------------------------------------------------------
+  # ===========================================================================
   RuntimeAgentFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: Runtime_Agent
+      FunctionName: !Sub Runtime_Agent${ResourceNameSuffix}
       Runtime: python3.11
       Handler: lambda_function.lambda_handler
       CodeUri: DevSecOps-Runtime_Agent/
-      Description: Level 1 자동 대응 및 Level 2/3 승인 후 대응
+      Description: Level 1 auto response and Level 2/3 approved actions
       Environment:
         Variables:
-          DEFAULT_S3_LOG_BUCKET: !Ref S3LogBucketName
-          S3_LOG_BUCKET: !Ref S3LogBucketName
+          DEFAULT_S3_LOG_BUCKET: !If
+            - IsGreenfield
+            - !Ref SecurityLogsBucket
+            - !Ref S3LogBucketName
+          S3_LOG_BUCKET: !If
+            - IsGreenfield
+            - !Ref SecurityLogsBucket
+            - !Ref S3LogBucketName
           SLACK_WEBHOOK_URL: '{{resolve:secretsmanager:opsguard/slack:SecretString:SLACK_WEBHOOK_URL}}'
           VPC_FLOW_LOG_GROUP: !Ref VpcFlowLogGroup
-          VPC_FLOW_ROLE_ARN: !Ref VpcFlowLogRoleArn
-          WAF_IPSET_ID: !Ref WafIpSetId
-          WAF_IPSET_NAME: !Ref WafIpSetName
+          VPC_FLOW_ROLE_ARN: !If
+            - IsGreenfield
+            - !GetAtt VpcFlowLogRole.Arn
+            - !Ref VpcFlowLogRoleArn
+          WAF_IPSET_ID: !If
+            - IsGreenfield
+            - !GetAtt BlockIpSet.Id
+            - !Ref WafIpSetId
+          WAF_IPSET_NAME: !If
+            - IsGreenfield
+            - !Sub ${WafIpSetName}${ResourceNameSuffix}
+            - !Ref WafIpSetName
           WAF_SCOPE: !Ref WafScope
           DB_TABLE_NAME: !Ref DynamoDbTableName
       Policies:
@@ -168,7 +305,15 @@ Resources:
                 - dynamodb:UpdateItem
                 - dynamodb:GetItem
                 - dynamodb:Query
-              Resource: !Ref DynamoDbTableArn
+              Resource:
+                - !If
+                  - IsGreenfield
+                  - !GetAtt ResponseHistoryTable.Arn
+                  - !Ref DynamoDbTableArn
+                - !If
+                  - IsGreenfield
+                  - !Sub ${ResponseHistoryTable.Arn}/index/*
+                  - !Sub ${DynamoDbTableArn}/index/*
             - Sid: IamMitigation
               Effect: Allow
               Action:
@@ -211,8 +356,14 @@ Resources:
                 - s3:GetBucketPublicAccessBlock
                 - s3:PutPublicAccessBlock
               Resource:
-                - !Sub arn:aws:s3:::${S3LogBucketName}
-                - !Sub arn:aws:s3:::${S3LogBucketName}/*
+                - !If
+                  - IsGreenfield
+                  - !Sub arn:aws:s3:::${SecurityLogsBucket}
+                  - !Sub arn:aws:s3:::${S3LogBucketName}
+                - !If
+                  - IsGreenfield
+                  - !Sub arn:aws:s3:::${SecurityLogsBucket}/*
+                  - !Sub arn:aws:s3:::${S3LogBucketName}/*
                 - arn:aws:s3:::*
             - Sid: WafIpBlock
               Effect: Allow
@@ -220,12 +371,18 @@ Resources:
                 - wafv2:GetIPSet
                 - wafv2:UpdateIPSet
               Resource:
-                - !Sub arn:aws:wafv2:${AWS::Region}:${AwsAccountId}:${WafScope}/ipset/${WafIpSetName}/${WafIpSetId}
+                - !If
+                  - IsGreenfield
+                  - !Sub arn:aws:wafv2:${AWS::Region}:${AWS::AccountId}:${WafScope}/ipset/${WafIpSetName}${ResourceNameSuffix}/${BlockIpSet.Id}
+                  - !Sub arn:aws:wafv2:${AWS::Region}:${AWS::AccountId}:${WafScope}/ipset/${WafIpSetName}/${WafIpSetId}
             - Sid: VpcFlowLogsPassRole
               Effect: Allow
               Action:
                 - iam:PassRole
-              Resource: !Ref VpcFlowLogRoleArn
+              Resource: !If
+                - IsGreenfield
+                - !GetAtt VpcFlowLogRole.Arn
+                - !Ref VpcFlowLogRoleArn
               Condition:
                 StringEquals:
                   iam:PassedToService: vpc-flow-logs.amazonaws.com
@@ -235,21 +392,24 @@ Resources:
                 - cloudtrail:LookupEvents
               Resource: '*'
 
-  # ---------------------------------------------------------------------------
+  # ===========================================================================
   # MCP Orchestrator
-  # ---------------------------------------------------------------------------
+  # ===========================================================================
   McpFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: MCP
+      FunctionName: !Sub MCP${ResourceNameSuffix}
       Runtime: python3.11
       Handler: lambda_function.lambda_handler
       CodeUri: DevSecOps-MCP/src/MCP/
-      Description: GuardDuty Finding 수신 후 Runtime / Finance / Regulation Agent 오케스트레이션
+      Description: GuardDuty orchestrator
       Environment:
         Variables:
           FINANCE_ARN: !GetAtt FinanceAgentFunction.Arn
-          REGULATION_ARN: !GetAtt RegulationAgentFunction.Arn
+          REGULATION_ARN: !If
+            - IsGreenfield
+            - !GetAtt RegulationAgentFunctionBuild.Arn
+            - !GetAtt RegulationAgentFunctionImage.Arn
           RUNTIME_ARN: !GetAtt RuntimeAgentFunction.Arn
           SLACK_BOT_TOKEN: '{{resolve:secretsmanager:opsguard/slack:SecretString:SLACK_BOT_TOKEN}}'
           SLACK_CHANNEL: !Ref SlackChannel
@@ -263,47 +423,57 @@ Resources:
               Resource:
                 - !GetAtt RuntimeAgentFunction.Arn
                 - !GetAtt FinanceAgentFunction.Arn
-                - !GetAtt RegulationAgentFunction.Arn
+                - !If
+                  - IsGreenfield
+                  - !GetAtt RegulationAgentFunctionBuild.Arn
+                  - !GetAtt RegulationAgentFunctionImage.Arn
                 - !GetAtt McpSlackResponseFunction.Arn
             - Sid: RegulationJsonStore
               Effect: Allow
               Action:
                 - dynamodb:PutItem
-              Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AwsAccountId}:table/${RegulationJsonTableName}
-      Events:
-        GuardDutyFinding:
-          Type: EventBridgeRule
-          Properties:
-            RuleName: guardduty-to-mcp
-            Description: GuardDuty finding 발생 시 MCP orchestrator 실행
-            EventBusName: default
-            Pattern:
-              source:
-                - aws.guardduty
-              detail-type:
-                - GuardDuty Finding
-              # -------------------------------------------------------------------
-              # [선택] severity >= 7 (HIGH/CRITICAL)만 처리하려면 아래 detail 블록의
-              # 주석을 해제하고 위 source/detail-type 과 함께 사용하세요.
-              # -------------------------------------------------------------------
-              # detail:
-              #   severity:
-              #     - numeric:
-              #         - '>='
-              #         - 7
+              Resource: !If
+                - IsGreenfield
+                - !GetAtt RegulationJsonTable.Arn
+                - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RegulationJsonTableName}
 
-  # ---------------------------------------------------------------------------
+  GuardDutyToMcpRule:
+    Type: AWS::Events::Rule
+    Condition: CreateGuardDutyTrigger
+    Properties:
+      Name: !Sub guardduty-to-mcp${ResourceNameSuffix}
+      Description: Invoke MCP on GuardDuty Finding
+      EventBusName: default
+      State: ENABLED
+      EventPattern:
+        source:
+          - aws.guardduty
+        detail-type:
+          - GuardDuty Finding
+      Targets:
+        - Arn: !GetAtt McpFunction.Arn
+          Id: McpOrchestratorTarget
+
+  GuardDutyToMcpPermission:
+    Type: AWS::Lambda::Permission
+    Condition: CreateGuardDutyTrigger
+    Properties:
+      FunctionName: !Ref McpFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt GuardDutyToMcpRule.Arn
+
+  # ===========================================================================
   # MCP Slack Response
-  # ---------------------------------------------------------------------------
+  # ===========================================================================
   McpSlackResponseFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: MCP-Slack-Response
-      # AWS Lambda는 Python 3.14 미지원 (2026-06 기준). 콘솔 표기와 무관하게 3.11 사용.
+      FunctionName: !Sub MCP-Slack-Response${ResourceNameSuffix}
       Runtime: python3.11
       Handler: lambda_function.lambda_handler
       CodeUri: DevSecOps-MCP/src/MCP-Slack-Response/
-      Description: Slack 승인/응답 이벤트 처리
+      Description: Slack approval and response handler
       Environment:
         Variables:
           FINANCE_ARN: !GetAtt FinanceAgentFunction.Arn
@@ -322,7 +492,10 @@ Resources:
               Effect: Allow
               Action:
                 - dynamodb:GetItem
-              Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AwsAccountId}:table/${RegulationJsonTableName}
+              Resource: !If
+                - IsGreenfield
+                - !GetAtt RegulationJsonTable.Arn
+                - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RegulationJsonTableName}
       Events:
         SlackEvents:
           Type: HttpApi
@@ -333,33 +506,33 @@ Resources:
 
 Outputs:
   SlackEventsApiUrl:
-    Description: Slack Events API 엔드포인트 (Slack App Request URL에 등록)
+    Description: Register this URL in Slack App Event Subscriptions
     Value: !Sub https://${OpsGuardHttpApi}.execute-api.${AWS::Region}.amazonaws.com/slack/events
 
   MCPFunctionArn:
     Description: MCP Orchestrator Lambda ARN
     Value: !GetAtt McpFunction.Arn
-    Export:
-      Name: !Sub ${AWS::StackName}-MCPFunctionArn
 
   RuntimeAgentFunctionArn:
     Description: Runtime Agent Lambda ARN
     Value: !GetAtt RuntimeAgentFunction.Arn
-    Export:
-      Name: !Sub ${AWS::StackName}-RuntimeAgentFunctionArn
 
   FinanceAgentFunctionArn:
     Description: Finance Agent Lambda ARN
     Value: !GetAtt FinanceAgentFunction.Arn
-    Export:
-      Name: !Sub ${AWS::StackName}-FinanceAgentFunctionArn
 
   RegulationAgentFunctionArn:
     Description: Regulation Agent Lambda ARN
-    Value: !GetAtt RegulationAgentFunction.Arn
-    Export:
-      Name: !Sub ${AWS::StackName}-RegulationAgentFunctionArn
+    Value: !If
+      - IsGreenfield
+      - !GetAtt RegulationAgentFunctionBuild.Arn
+      - !GetAtt RegulationAgentFunctionImage.Arn
 
-  OpsGuardHttpApiId:
-    Description: HTTP API Gateway ID
-    Value: !Ref OpsGuardHttpApi
+  DeployMode:
+    Description: Deployment mode used
+    Value: !Ref DeployMode
+
+  SecurityLogsBucketName:
+    Condition: IsGreenfield
+    Description: S3 bucket created for Runtime Agent logging
+    Value: !Ref SecurityLogsBucket

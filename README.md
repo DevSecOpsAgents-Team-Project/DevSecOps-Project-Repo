@@ -1,24 +1,238 @@
-# DevSecOps-Project-Repo
+# OpsGuard
 
-OpsGuard 통합 레포지토리 — Runtime, Regulation, Finance Agent 및 MCP Orchestrator.
+GuardDuty 보안 알림이 오면 **MCP**가 **Runtime / Finance / Regulation** Agent를 순서대로 호출하는 시스템입니다.
 
-## AWS SAM 배포
-
-GuardDuty → MCP → Agent 파이프라인을 SAM으로 배포하는 방법은 **[SAM-DEPLOY.md](./SAM-DEPLOY.md)** 를 참고하세요.
-
-```bash
-cd DevSecOps-Project-Repo
-sam validate --lint
-sam build
-sam deploy --guided   # 최초
-sam build && sam deploy   # 이후
+```
+GuardDuty 알림 → MCP → Runtime / Finance / Regulation Agent
+Slack 승인     → MCP-Slack-Response → Runtime / Finance
 ```
 
-## 구성 요소
+---
 
-| 디렉터리 | 역할 |
-|----------|------|
-| `DevSecOps-MCP/` | MCP Orchestrator, Slack Response |
-| `DevSecOps-Runtime_Agent/` | Level 1~3 자동/승인 대응 |
-| `DevSecOps-Finance_Agent/` | 비용 분석·시뮬레이션 |
-| `DevSecOps-Regulation_Agent/` | ChromaDB RAG 규제 분석 (컨테이너) |
+## 처음부터 배포하기 (새 AWS 계정 · greenfield)
+
+GitHub에서 레포만 받은 **완전 새 사용자**는 아래 순서대로 진행하세요.
+
+| 단계 | 하는 일 |
+|------|---------|
+| 1 | 레포 clone + PC 도구 설치 |
+| 2 | AWS 로그인 |
+| 3 | Secrets 등록 (OpenAI, Slack) |
+| 4 | **chroma_db** Release에서 다운로드 |
+| 5 | `samconfig.toml` 설정 |
+| 6 | `sam build` → `sam deploy` |
+| 7 | Slack App URL 연결 |
+
+**greenfield** 배포 시 SAM이 새로 만드는 것: Lambda 5개, DynamoDB 2개, S3, WAF IPSet, HTTP API, EventBridge Rule.
+
+---
+
+## 1. 레포 받기 & PC 설치
+
+```powershell
+git clone https://github.com/DevSecOpsAgents-Team-Project/DevSecOps-Project-Repo.git
+cd DevSecOps-Project-Repo
+```
+
+설치 목록:
+
+- [AWS CLI](https://aws.amazon.com/cli/)
+- [AWS SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html)
+- [Docker Desktop](https://www.docker.com/) — **실행 상태 유지** (Regulation Agent Docker 빌드용)
+
+---
+
+## 2. AWS 로그인
+
+```powershell
+aws configure
+aws sts get-caller-identity
+```
+
+Region 예: `ap-northeast-2`
+
+배포 사용자 권한: CloudFormation, IAM, Lambda, S3, API Gateway, EventBridge, ECR, DynamoDB, WAFv2, Secrets Manager(read). 처음엔 `AdministratorAccess`로 테스트 후 줄여도 됩니다.
+
+---
+
+## 3. Secrets Manager (계정당 1회)
+
+`scripts/setup-secrets.ps1`에서 **PASTE_YOUR_...** 를 실제 값으로 바꾼 뒤:
+
+```powershell
+cd scripts
+.\setup-secrets.ps1
+cd ..
+```
+
+시크릿은 **반드시 JSON 형식**:
+
+```json
+{"OPENAI_API_KEY":"sk-..."}
+{"SLACK_BOT_TOKEN":"xoxb-...","SLACK_WEBHOOK_URL":"https://hooks.slack.com/services/..."}
+```
+
+---
+
+## 4. chroma_db 다운로드 (Regulation Agent RAG)
+
+`chroma.sqlite3`는 Git에 포함되지 않습니다. **GitHub Release**에서 받으세요.
+
+- Release 페이지: [chroma-db-v1](https://github.com/DevSecOpsAgents-Team-Project/DevSecOps-Project-Repo/releases/tag/chroma-db-v1)
+- 직접 다운로드: [chroma_db.zip](https://github.com/DevSecOpsAgents-Team-Project/DevSecOps-Project-Repo/releases/download/chroma-db-v1/chroma_db.zip)
+
+프로젝트 **루트**에서:
+
+```powershell
+# 방법 A: 스크립트로 다운로드 + 확인
+.\scripts\prepare-chroma.ps1 -Download
+
+# 방법 B: 수동
+Invoke-WebRequest `
+  -Uri "https://github.com/DevSecOpsAgents-Team-Project/DevSecOps-Project-Repo/releases/download/chroma-db-v1/chroma_db.zip" `
+  -OutFile chroma_db.zip
+Expand-Archive chroma_db.zip -DestinationPath DevSecOps-Regulation_Agent\ -Force
+.\scripts\prepare-chroma.ps1
+```
+
+`OK: DevSecOps-Regulation_Agent\chroma_db\chroma.sqlite3 exists` 가 나오면 다음 단계로.
+
+> Release의 **Source code (zip/tar.gz)** 는 GitHub이 자동 생성한 레포 소스입니다. `chroma_db.zip`만 받으면 됩니다.
+
+---
+
+## 5. samconfig.toml 설정
+
+```powershell
+Copy-Item samconfig.toml.example samconfig.toml
+```
+
+`samconfig.toml`에서 `SlackChannel=C0123456789` 를 **본인 Slack 채널 ID**로 수정.
+
+새 사용자는 기본값 그대로 사용 (`DeployMode=greenfield`). 팀 ECR URI나 기존 DynamoDB ARN은 **넣지 마세요**.
+
+---
+
+## 6. 빌드 & 배포
+
+프로젝트 **루트**에서:
+
+```powershell
+$env:PYTHONUTF8=1
+sam validate --lint
+sam build
+sam deploy --guided
+```
+
+`sam deploy --guided` 질문 예시:
+
+| 질문 | 답 |
+|------|-----|
+| Stack Name | `opsguard` |
+| Region | `ap-northeast-2` |
+| **DeployMode** | **`greenfield`** |
+| SlackChannel | 실제 채널 ID |
+| Allow IAM role creation | `Y` |
+| **Capabilities** | `CAPABILITY_IAM CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM` |
+| Save to samconfig | `Y` |
+| Slack API 인증 없음 경고 | `Y` (배포 후 Slack URL 등록) |
+
+성공:
+
+```
+Successfully created/updated stack - opsguard
+```
+
+### 이후 코드 수정 시
+
+```powershell
+$env:PYTHONUTF8=1
+sam build
+sam deploy
+```
+
+---
+
+## 7. 배포 확인 & Slack 연결
+
+```powershell
+aws cloudformation describe-stacks --stack-name opsguard --region ap-northeast-2 --query "Stacks[0].Outputs" --output table
+```
+
+| Output | 용도 |
+|--------|------|
+| `SlackEventsApiUrl` | Slack App Event Subscriptions Request URL |
+| `MCPFunctionArn` | MCP Lambda ARN |
+
+Lambda 콘솔: `MCP`, `MCP-Slack-Response`, `Runtime_Agent`, `Finance_Agent`, `Regulation_Agent`
+
+Slack App ([api.slack.com/apps](https://api.slack.com/apps)):
+
+1. **Event Subscriptions** → Request URL = `SlackEventsApiUrl`
+2. **Interactivity** 켜기
+
+---
+
+## 레포 구조
+
+| 폴더 | 하는 일 |
+|------|---------|
+| `DevSecOps-MCP/` | MCP, Slack 응답 |
+| `DevSecOps-Runtime_Agent/` | AWS 자동 대응 |
+| `DevSecOps-Finance_Agent/` | 비용 분석 |
+| `DevSecOps-Regulation_Agent/` | 규제/RAG (Docker) |
+
+| 파일 | 하는 일 |
+|------|---------|
+| `template.yaml` | AWS 리소스 정의 |
+| `samconfig.toml.example` | 배포 설정 예시 |
+| `scripts/setup-secrets.ps1` | Secrets 등록 |
+| `scripts/prepare-chroma.ps1` | chroma_db 확인 (또는 Release 다운로드) |
+
+---
+
+## greenfield vs existing
+
+| DeployMode | 언제 |
+|------------|------|
+| **`greenfield`** | **새 AWS 계정** — 이 README의 기본 경로. Regulation은 로컬 Docker 빌드 + chroma_db |
+| `existing` | 팀 운영 계정 — 기존 DynamoDB/S3/WAF/ECR 이미지 참조 |
+
+팀 계정 예시 (`existing`):
+
+```powershell
+sam deploy --parameter-overrides `
+  DeployMode=existing `
+  RegulationImageUri=ACCOUNT.dkr.ecr.ap-northeast-2.amazonaws.com/regulation-agent:TAG `
+  DynamoDbTableArn=arn:aws:dynamodb:ap-northeast-2:ACCOUNT:table/AgentB_Response_History `
+  SlackChannel=C0XXXXXXX
+```
+
+---
+
+## 자주 나는 오류
+
+| 증상 | 해결 |
+|------|------|
+| `template.yaml not found` | 프로젝트 **루트**에서 실행 (`cd` 확인) |
+| `ROLLBACK_COMPLETE` | `aws cloudformation delete-stack --stack-name opsguard` 후 재배포 |
+| `Could not parse SecretString JSON` | Secrets를 `{"KEY":"value"}` 형식으로 저장 |
+| `cp949` / `UnicodeDecodeError` | `$env:PYTHONUTF8=1` |
+| Lambda 이름 충돌 | `ResourceNameSuffix=-dev` 추가 |
+| IAM AccessDenied | 배포 사용자 권한 추가 |
+| Regulation Docker 빌드 실패 | Docker 실행 여부 + `prepare-chroma.ps1` 확인 |
+
+---
+
+## Git에 올리면 안 되는 것
+
+- `samconfig.toml` (개인 Slack 채널 ID 등)
+- `.aws-sam/` 빌드 캐시
+- `chroma_db/` 데이터 (`chroma.sqlite3` — [Release](https://github.com/DevSecOpsAgents-Team-Project/DevSecOps-Project-Repo/releases/tag/chroma-db-v1)에서 배포)
+- API 키, Slack 토큰
+
+---
+
+## 문의
+
+GitHub Issues에 등록해 주세요.

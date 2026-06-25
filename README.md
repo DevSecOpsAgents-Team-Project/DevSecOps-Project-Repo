@@ -122,6 +122,12 @@ sam build
 sam deploy --guided
 ```
 
+WafIpSetId
+VpcFlowLogRoleArn
+RegulationImageUri
+S3LogBucketName 등등에 대해서는 default값을 사용하면 됩니다.
+(엔터로 넘기기)
+
 `sam deploy --guided` 질문 예시:
 
 | 질문                     | 답                                                           |

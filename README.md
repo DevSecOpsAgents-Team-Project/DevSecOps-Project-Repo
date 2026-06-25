@@ -172,8 +172,13 @@ Lambda 콘솔: `MCP`, `MCP-Slack-Response`, `Runtime_Agent`, `Finance_Agent`, `R
 
 Slack App ([api.slack.com/apps](https://api.slack.com/apps)):
 
-1. **Event Subscriptions** → Request URL = `SlackEventsApiUrl`
-2. **Interactivity** 켜기
+1. Slack App 선택 → **Event Subscriptions** → **Enable Events** 켜기
+2. **Request URL** = `SlackEventsApiUrl` 입력 후 저장
+3. 같은 Slack App에서 **Interactivity & Shortcuts** → **Interactivity** 켜기
+4. **Request URL** = `SlackEventsApiUrl` 를 **동일하게 다시 입력** 후 저장
+
+`Finance 계산 요청`, 승인/거절 버튼 등 Slack 버튼 액션은 **Interactivity**가 켜져 있어야 동작합니다.
+Event Subscriptions만 설정하고 Interactivity를 비워두면, 메시지는 와도 버튼 클릭 시 후속 Lambda(`MCP-Slack-Response`)가 정상 호출되지 않을 수 있습니다.
 
 ---
 

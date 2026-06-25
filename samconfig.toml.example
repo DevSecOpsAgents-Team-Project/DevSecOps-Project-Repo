@@ -1,5 +1,5 @@
 # Copy this file before first deploy:
-#   Copy-Item samconfig.toml.example samconfig.toml
+# Copy-Item samconfig.toml.example to samconfig.toml
 # Then edit SlackChannel in samconfig.toml (your real Slack channel ID).
 
 version = 0.1

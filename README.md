@@ -9,21 +9,19 @@ Slack 승인     → MCP-Slack-Response → Runtime / Finance
 
 ---
 
-## 처음부터 배포하기 (새 AWS 계정 · greenfield)
+## opsguard 설치하기 (새 AWS 계정 · greenfield)
 
-GitHub에서 레포만 받은 **완전 새 사용자**는 아래 순서대로 진행하세요.
+Repo를 clone한 뒤, 아래 순서대로 진행하세요.
 
-| 단계 | 하는 일 |
-|------|---------|
-| 1 | 레포 clone + PC 도구 설치 |
-| 2 | AWS 로그인 |
-| 3 | Secrets 등록 (OpenAI, Slack) |
-| 4 | **chroma_db** Release에서 다운로드 |
-| 5 | `samconfig.toml` 설정 |
-| 6 | `sam build` → `sam deploy` |
-| 7 | Slack App URL 연결 |
-
-**greenfield** 배포 시 SAM이 새로 만드는 것: Lambda 5개, DynamoDB 2개, S3, WAF IPSet, HTTP API, EventBridge Rule.
+| 단계 | 하는 일                            |
+| ---- | ---------------------------------- |
+| 1    | 레포 clone + PC 도구 설치          |
+| 2    | AWS 로그인                         |
+| 3    | Secrets 등록 (OpenAI, Slack)       |
+| 4    | **chroma_db** Release에서 다운로드 |
+| 5    | `samconfig.toml` 설정              |
+| 6    | `sam build` → `sam deploy`         |
+| 7    | Slack App URL 연결                 |
 
 ---
 
@@ -51,13 +49,15 @@ aws sts get-caller-identity
 
 Region 예: `ap-northeast-2`
 
-배포 사용자 권한: CloudFormation, IAM, Lambda, S3, API Gateway, EventBridge, ECR, DynamoDB, WAFv2, Secrets Manager(read). 처음엔 `AdministratorAccess`로 테스트 후 줄여도 됩니다.
+필요 사용자 권한: CloudFormation, IAM, Lambda, S3, API Gateway, EventBridge, ECR, DynamoDB, WAFv2, Secrets Manager(read).
+
+추천 : `AdministratorAccess` 권한 부여 후 설치하고, 이후 권한 삭제
 
 ---
 
 ## 3. Secrets Manager (계정당 1회)
 
-`scripts/setup-secrets.ps1`에서 **PASTE_YOUR_...** 를 실제 값으로 바꾼 뒤:
+`scripts/setup-secrets.ps1`에서 **PASTE*YOUR*...** 를 실제 값으로 바꾼 뒤:
 
 ```powershell
 cd scripts
@@ -65,7 +65,7 @@ cd scripts
 cd ..
 ```
 
-시크릿은 **반드시 JSON 형식**:
+시크릿은 **반드시 JSON 형식**으로 입력하세요:
 
 ```json
 {"OPENAI_API_KEY":"sk-..."}
@@ -107,9 +107,7 @@ Expand-Archive chroma_db.zip -DestinationPath DevSecOps-Regulation_Agent\ -Force
 Copy-Item samconfig.toml.example samconfig.toml
 ```
 
-`samconfig.toml`에서 `SlackChannel=C0123456789` 를 **본인 Slack 채널 ID**로 수정.
-
-새 사용자는 기본값 그대로 사용 (`DeployMode=greenfield`). 팀 ECR URI나 기존 DynamoDB ARN은 **넣지 마세요**.
+`samconfig.toml`에서 `SlackChannel=C0123456789` 를 **본인 Slack 채널 ID**로 수정하세요.
 
 ---
 
@@ -126,16 +124,16 @@ sam deploy --guided
 
 `sam deploy --guided` 질문 예시:
 
-| 질문 | 답 |
-|------|-----|
-| Stack Name | `opsguard` |
-| Region | `ap-northeast-2` |
-| **DeployMode** | **`greenfield`** |
-| SlackChannel | 실제 채널 ID |
-| Allow IAM role creation | `Y` |
-| **Capabilities** | `CAPABILITY_IAM CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM` |
-| Save to samconfig | `Y` |
-| Slack API 인증 없음 경고 | `Y` (배포 후 Slack URL 등록) |
+| 질문                     | 답                                                           |
+| ------------------------ | ------------------------------------------------------------ |
+| Stack Name               | `opsguard`                                                   |
+| Region                   | `ap-northeast-2`                                             |
+| **DeployMode**           | **`greenfield`**                                             |
+| SlackChannel             | 실제 채널 ID                                                 |
+| Allow IAM role creation  | `Y`                                                          |
+| **Capabilities**         | `CAPABILITY_IAM CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM` |
+| Save to samconfig        | `Y`                                                          |
+| Slack API 인증 없음 경고 | `Y` (배포 후 Slack URL 등록)                                 |
 
 성공:
 
@@ -159,10 +157,10 @@ sam deploy
 aws cloudformation describe-stacks --stack-name opsguard --region ap-northeast-2 --query "Stacks[0].Outputs" --output table
 ```
 
-| Output | 용도 |
-|--------|------|
+| Output              | 용도                                      |
+| ------------------- | ----------------------------------------- |
 | `SlackEventsApiUrl` | Slack App Event Subscriptions Request URL |
-| `MCPFunctionArn` | MCP Lambda ARN |
+| `MCPFunctionArn`    | MCP Lambda ARN                            |
 
 Lambda 콘솔: `MCP`, `MCP-Slack-Response`, `Runtime_Agent`, `Finance_Agent`, `Regulation_Agent`
 
@@ -175,61 +173,33 @@ Slack App ([api.slack.com/apps](https://api.slack.com/apps)):
 
 ## 레포 구조
 
-| 폴더 | 하는 일 |
-|------|---------|
-| `DevSecOps-MCP/` | MCP, Slack 응답 |
-| `DevSecOps-Runtime_Agent/` | AWS 자동 대응 |
-| `DevSecOps-Finance_Agent/` | 비용 분석 |
+| 폴더                          | 하는 일           |
+| ----------------------------- | ----------------- |
+| `DevSecOps-MCP/`              | MCP, Slack 응답   |
+| `DevSecOps-Runtime_Agent/`    | AWS 자동 대응     |
+| `DevSecOps-Finance_Agent/`    | 비용 분석         |
 | `DevSecOps-Regulation_Agent/` | 규제/RAG (Docker) |
 
-| 파일 | 하는 일 |
-|------|---------|
-| `template.yaml` | AWS 리소스 정의 |
-| `samconfig.toml.example` | 배포 설정 예시 |
-| `scripts/setup-secrets.ps1` | Secrets 등록 |
+| 파일                         | 하는 일                                |
+| ---------------------------- | -------------------------------------- |
+| `template.yaml`              | AWS 리소스 정의                        |
+| `samconfig.toml.example`     | 배포 설정 예시                         |
+| `scripts/setup-secrets.ps1`  | Secrets 등록                           |
 | `scripts/prepare-chroma.ps1` | chroma_db 확인 (또는 Release 다운로드) |
-
----
-
-## greenfield vs existing
-
-| DeployMode | 언제 |
-|------------|------|
-| **`greenfield`** | **새 AWS 계정** — 이 README의 기본 경로. Regulation은 로컬 Docker 빌드 + chroma_db |
-| `existing` | 팀 운영 계정 — 기존 DynamoDB/S3/WAF/ECR 이미지 참조 |
-
-팀 계정 예시 (`existing`):
-
-```powershell
-sam deploy --parameter-overrides `
-  DeployMode=existing `
-  RegulationImageUri=ACCOUNT.dkr.ecr.ap-northeast-2.amazonaws.com/regulation-agent:TAG `
-  DynamoDbTableArn=arn:aws:dynamodb:ap-northeast-2:ACCOUNT:table/AgentB_Response_History `
-  SlackChannel=C0XXXXXXX
-```
 
 ---
 
 ## 자주 나는 오류
 
-| 증상 | 해결 |
-|------|------|
-| `template.yaml not found` | 프로젝트 **루트**에서 실행 (`cd` 확인) |
-| `ROLLBACK_COMPLETE` | `aws cloudformation delete-stack --stack-name opsguard` 후 재배포 |
-| `Could not parse SecretString JSON` | Secrets를 `{"KEY":"value"}` 형식으로 저장 |
-| `cp949` / `UnicodeDecodeError` | `$env:PYTHONUTF8=1` |
-| Lambda 이름 충돌 | `ResourceNameSuffix=-dev` 추가 |
-| IAM AccessDenied | 배포 사용자 권한 추가 |
-| Regulation Docker 빌드 실패 | Docker 실행 여부 + `prepare-chroma.ps1` 확인 |
-
----
-
-## Git에 올리면 안 되는 것
-
-- `samconfig.toml` (개인 Slack 채널 ID 등)
-- `.aws-sam/` 빌드 캐시
-- `chroma_db/` 데이터 (`chroma.sqlite3` — [Release](https://github.com/DevSecOpsAgents-Team-Project/DevSecOps-Project-Repo/releases/tag/chroma-db-v1)에서 배포)
-- API 키, Slack 토큰
+| 증상                                | 해결                                                              |
+| ----------------------------------- | ----------------------------------------------------------------- |
+| `template.yaml not found`           | 프로젝트 **루트**에서 실행 (`cd` 확인)                            |
+| `ROLLBACK_COMPLETE`                 | `aws cloudformation delete-stack --stack-name opsguard` 후 재배포 |
+| `Could not parse SecretString JSON` | Secrets를 `{"KEY":"value"}` 형식으로 저장                         |
+| `cp949` / `UnicodeDecodeError`      | `$env:PYTHONUTF8=1`                                               |
+| Lambda 이름 충돌                    | `ResourceNameSuffix=-dev` 추가                                    |
+| IAM AccessDenied                    | 배포 사용자 권한 추가                                             |
+| Regulation Docker 빌드 실패         | Docker 실행 여부 + `prepare-chroma.ps1` 확인                      |
 
 ---
 

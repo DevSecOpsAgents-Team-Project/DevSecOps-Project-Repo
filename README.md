@@ -180,6 +180,8 @@ Slack App ([api.slack.com/apps](https://api.slack.com/apps)):
 `Finance 계산 요청`, 승인/거절 버튼 등 Slack 버튼 액션은 **Interactivity**가 켜져 있어야 동작합니다.
 Event Subscriptions만 설정하고 Interactivity를 비워두면, 메시지는 와도 버튼 클릭 시 후속 Lambda(`MCP-Slack-Response`)가 정상 호출되지 않을 수 있습니다.
 
+Request URL 저장 시 Slack이 `challenge` 검증을 보냅니다. `MCP-Slack-Response` Lambda가 이를 응답해야 URL 등록이 성공합니다.
+
 ---
 
 ## 레포 구조
@@ -202,15 +204,16 @@ Event Subscriptions만 설정하고 Interactivity를 비워두면, 메시지는 
 
 ## 자주 나는 오류
 
-| 증상                                | 해결                                                              |
-| ----------------------------------- | ----------------------------------------------------------------- |
-| `template.yaml not found`           | 프로젝트 **루트**에서 실행 (`cd` 확인)                            |
-| `ROLLBACK_COMPLETE`                 | `aws cloudformation delete-stack --stack-name opsguard` 후 재배포 |
-| `Could not parse SecretString JSON` | Secrets를 `{"KEY":"value"}` 형식으로 저장                         |
-| `cp949` / `UnicodeDecodeError`      | `$env:PYTHONUTF8=1`                                               |
-| Lambda 이름 충돌                    | `ResourceNameSuffix=-dev` 추가                                    |
-| IAM AccessDenied                    | 배포 사용자 권한 추가                                             |
-| Regulation Docker 빌드 실패         | Docker 실행 여부 + `prepare-chroma.ps1` 확인                      |
+| 증상                                    | 해결                                                                         |
+| --------------------------------------- | ---------------------------------------------------------------------------- |
+| `template.yaml not found`               | 프로젝트 **루트**에서 실행 (`cd` 확인)                                       |
+| `ROLLBACK_COMPLETE`                     | `aws cloudformation delete-stack --stack-name opsguard` 후 재배포            |
+| `Could not parse SecretString JSON`     | Secrets를 `{"KEY":"value"}` 형식으로 저장                                    |
+| `cp949` / `UnicodeDecodeError`          | `$env:PYTHONUTF8=1`                                                          |
+| Lambda 이름 충돌                        | `ResourceNameSuffix=-dev` 추가                                               |
+| IAM AccessDenied                        | 배포 사용자 권한 추가                                                        |
+| Regulation Docker 빌드 실패             | Docker 실행 여부 + `prepare-chroma.ps1` 확인                                 |
+| Slack Request URL HTTP 오류 / challenge | `sam build` → `sam deploy` 후 URL 재등록. `SlackEventsApiUrl` 오타·리전 확인 |
 
 ---
 

@@ -21,6 +21,7 @@ confirm_changeset = true
 resolve_s3 = true
 resolve_image_repos = true
 parameter_overrides = [
+  "ResourceNameSuffix=-dev",
   "DeployMode=greenfield",
   "SlackChannel=C0123456789",
   "EnableGuardDutyTrigger=true",
